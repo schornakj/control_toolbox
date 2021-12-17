@@ -90,6 +90,12 @@ target_include_directories(low_pass_filter PUBLIC include)
 target_link_libraries(low_pass_filter parameter_handler)
 ament_target_dependencies(low_pass_filter ${CONTROL_FILTERS_INCLUDE_DEPENDS})
 
+add_library(mean_wrench_filter SHARED
+  src/control_filters/mean_wrench_filter.cpp
+)
+target_include_directories(mean_wrench_filter PUBLIC include)
+target_link_libraries(mean_wrench_filter parameter_handler)
+ament_target_dependencies(mean_wrench_filter ${CONTROL_FILTERS_INCLUDE_DEPENDS})
 
 ##########
 # Testing
@@ -128,7 +134,10 @@ install(TARGETS ${PROJECT_NAME} parameter_handler
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin)
 
-install(TARGETS gravity_compensation low_pass_filter
+install(TARGETS
+    gravity_compensation
+    low_pass_filter
+    mean_wrench_filter
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
@@ -153,6 +162,7 @@ ament_export_libraries(
 
   gravity_compensation
   low_pass_filter
+  mean_wrench_filter
 )
 
 ament_package()
