@@ -295,7 +295,10 @@ private:
   {
     for (const auto & parameter : parameters)
     {
-      node->declare_parameter<PT>(parameter.first.name, parameter.second);
+      if (!node->has_parameter(parameter.first.name))
+      {
+        node->declare_parameter<PT>(parameter.first.name, parameter.second);
+      }
     }
   }
 
