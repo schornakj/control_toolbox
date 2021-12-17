@@ -199,6 +199,7 @@ inline bool LowPassFilter<geometry_msgs::msg::WrenchStamped>::update(
   data_out.wrench.torque.x = msg_filtered[3];
   data_out.wrench.torque.y = msg_filtered[4];
   data_out.wrench.torque.z = msg_filtered[5];
+  data_out.header = data_in.header;
   return true;
 }
 
