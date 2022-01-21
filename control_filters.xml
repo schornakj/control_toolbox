@@ -25,6 +25,13 @@
           This is a low pass filter working with geometry_msgs::WrenchStamped.
       </description>
     </class>
+    <class name="control_filters/LowPassFilterJointTrajectoryPoint"
+           type="control_filters::LowPassFilter<trajectory_msgs::msg::JointTrajectoryPoint>"
+           base_class_type="filters::FilterBase<trajectory_msgs::msg::JointTrajectoryPoint>">
+      <description>
+          This is a low pass filter working with trajectory_msgs::msg::JointTrajectoryPoint.
+      </description>
+    </class>
   </library>
   <library path="mean_wrench_filter">
     <class name="filters/MeanFilterWrench"

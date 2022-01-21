@@ -25,6 +25,7 @@
 #include "filters/filter_base.hpp"
 
 #include "geometry_msgs/msg/wrench_stamped.hpp"
+#include "trajectory_msgs/msg/joint_trajectory_point.hpp"
 
 namespace control_filters
 {
@@ -112,6 +113,8 @@ public:
   bool update(const T & data_in, T & data_out) override;
 
 private:
+  void initializeStorage();
+
   rclcpp::Clock::SharedPtr clock_;
   std::shared_ptr<rclcpp::Logger> logger_;
   std::unique_ptr<LowPassParameters> parameters_;
@@ -119,14 +122,15 @@ private:
   // Callback for updating dynamic parameters
   rclcpp::node_interfaces::OnSetParametersCallbackHandle::SharedPtr on_set_callback_handle_;
 
-  // Filter parameters
-  // TODO(destogl): we should do this more intelligently using only one set of types
-  double filtered_value, filtered_old_value, old_value;
-  Eigen::Matrix<double, 6, 1> msg_filtered, msg_filtered_old, msg_old;
+  // Storage for filtered message history
+  Eigen::Matrix<double, Eigen::Dynamic, 1> msg_filtered, msg_filtered_old, msg_old;
+
+  // Flag for if dynamic storage variables have been initialized to the correct length for message type T.
+  std::atomic_bool storage_initialized_;
 };
 
 template <typename T>
-LowPassFilter<T>::LowPassFilter()
+LowPassFilter<T>::LowPassFilter() : storage_initialized_{ false }
 {
 }
 
@@ -152,13 +156,8 @@ bool LowPassFilter<T>::configure()
     return false;
   }
 
-  // Initialize storage Vectors
-  filtered_value = filtered_old_value = old_value = 0;
-  // TODO(destogl): make the size parameterizable and more intelligent is using complex types
-  for (size_t i = 0; i < 6; ++i)
-  {
-    msg_filtered[i] = msg_filtered_old[i] = msg_old[i] = 0;
-  }
+  // Initialize storage vectors
+  initializeStorage();
 
   // Add callback to dynamically update parameters
   on_set_callback_handle_ = this->params_interface_->add_on_set_parameters_callback(
@@ -167,6 +166,33 @@ bool LowPassFilter<T>::configure()
     });
 
   return true;
+}
+
+template<typename T>
+inline void LowPassFilter<T>::initializeStorage()
+{
+  // NOTE: assumes that T is a scalar type
+  msg_filtered = Eigen::Matrix<T, 1, 1>::Zero();
+  msg_filtered_old = Eigen::Matrix<T, 1, 1>::Zero();
+  msg_old = Eigen::Matrix<T, 1, 1>::Zero();
+  storage_initialized_ = true;
+}
+
+template<>
+inline void LowPassFilter<geometry_msgs::msg::WrenchStamped>::initializeStorage()
+{
+  // WrenchStamped messages have 6 fields
+  msg_filtered = Eigen::Matrix<double, 6, 1>::Zero();
+  msg_filtered_old = Eigen::Matrix<double, 6, 1>::Zero();
+  msg_old = Eigen::Matrix<double, 6, 1>::Zero();
+  storage_initialized_ = true;
+}
+
+template<>
+inline void LowPassFilter<trajectory_msgs::msg::JointTrajectoryPoint>::initializeStorage()
+{
+  // noop for trajectory_msgs::msg::JointTrajectoryPoint, because the size of the vector needs to be calculated
+  // from the actual size of the effort, position, velocity, and acceleration fields in the received messages.
 }
 
 template <>
@@ -203,6 +229,67 @@ inline bool LowPassFilter<geometry_msgs::msg::WrenchStamped>::update(
   return true;
 }
 
+template <>
+inline bool LowPassFilter<trajectory_msgs::msg::JointTrajectoryPoint>::update(
+  const trajectory_msgs::msg::JointTrajectoryPoint & data_in, trajectory_msgs::msg::JointTrajectoryPoint & data_out)
+{
+  if (!this->configured_)
+  {
+    RCLCPP_ERROR_SKIPFIRST_THROTTLE((*logger_), *clock_, 2000, "Filter is not configured");
+    return false;
+  }
+
+  // If storage has not been initialized yet, do so at this point using the sizes of the fields in data_in
+  if (!storage_initialized_)
+  {
+    const std::size_t n_rows_total = data_in.effort.size() + data_in.positions.size() + data_in.velocities.size() + data_in.accelerations.size();
+    msg_filtered = Eigen::Matrix<double, Eigen::Dynamic, 1>::Zero(n_rows_total, 1);
+    msg_filtered_old = Eigen::Matrix<double, Eigen::Dynamic, 1>::Zero(n_rows_total, 1);
+    msg_old = Eigen::Matrix<double, Eigen::Dynamic, 1>::Zero(n_rows_total, 1);
+    storage_initialized_ = true;
+  }
+
+  data_out = data_in;
+
+  parameters_->update();
+
+  // IIR Filter
+  msg_filtered = parameters_->b1_ * msg_old + parameters_->a1_ * msg_filtered_old;
+  msg_filtered_old = msg_filtered;
+
+  std::size_t index = 0;
+
+  for (std::size_t i = 0; i < data_in.effort.size(); ++i)
+  {
+    msg_old[index] = data_in.effort[i];
+    data_out.effort[i] = msg_filtered[index];
+    ++index;
+  }
+
+  for (std::size_t i = 0; i < data_in.positions.size(); ++i)
+  {
+    msg_old[index] = data_in.positions[i];
+    data_out.positions[i] = msg_filtered[index];
+    ++index;
+  }
+
+  for (std::size_t i = 0; i < data_in.velocities.size(); ++i)
+  {
+    msg_old[index] = data_in.velocities[i];
+    data_out.velocities[i] = msg_filtered[index];
+    ++index;
+  }
+
+  for (std::size_t i = 0; i < data_in.accelerations.size(); ++i)
+  {
+    msg_old[index] = data_in.accelerations[i];
+    data_out.accelerations[i] = msg_filtered[index];
+    ++index;
+  }
+
+  return true;
+}
+
 template <typename T>
 bool LowPassFilter<T>::update(const T & data_in, T & data_out)
 {
@@ -212,12 +299,18 @@ bool LowPassFilter<T>::update(const T & data_in, T & data_out)
     return false;
   }
 
+  if (!this->storage_initialized_)
+  {
+    RCLCPP_ERROR_SKIPFIRST_THROTTLE((*logger_), *clock_, 2000, "Storage not initialized");
+    return false;
+  }
+
   parameters_->update();
 
-  // Filter
-  data_out = parameters_->b1_ * old_value + parameters_->a1_ * filtered_old_value;
-  filtered_old_value = data_out;
-  old_value = data_in;
+  // Filter  
+  msg_filtered = parameters_->b1_ * msg_old + parameters_->a1_ * msg_filtered_old;
+  msg_filtered_old = msg_filtered;
+  msg_old = Eigen::Matrix<T, 1, 1>(data_in);  // NOTE: assumes that data_in is a scalar type
 
   return true;
 }

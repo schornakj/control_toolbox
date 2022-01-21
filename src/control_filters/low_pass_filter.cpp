@@ -21,3 +21,7 @@ PLUGINLIB_EXPORT_CLASS(control_filters::LowPassFilter<double>, filters::FilterBa
 PLUGINLIB_EXPORT_CLASS(
   control_filters::LowPassFilter<geometry_msgs::msg::WrenchStamped>,
   filters::FilterBase<geometry_msgs::msg::WrenchStamped>)
+
+PLUGINLIB_EXPORT_CLASS(
+  control_filters::LowPassFilter<trajectory_msgs::msg::JointTrajectoryPoint>,
+  filters::FilterBase<trajectory_msgs::msg::JointTrajectoryPoint>)
